@@ -61,15 +61,20 @@ class SupabaseClient {
     }
 
 
-    suspend fun deleteBet(id: String, token: String) { // Ajouter le token
-        client.delete("$supabaseUrl/rest/v1/bets") {
+    suspend fun deleteBet(id: String, token: String) {
+        val response = client.delete("$supabaseUrl/rest/v1/bets") {
             headers {
                 append("apikey", supabaseKey)
-                append("Authorization", "Bearer $token") // Utiliser le token utilisateur
+                append("Authorization", "Bearer $token")
+                append("Prefer", "return=representation") // utile pour forcer un retour
             }
             parameter("id", "eq.$id")
         }
+
+        println("📬 Supabase DELETE status: ${response.status}")
+        println("📬 Supabase DELETE body: ${response.bodyAsText()}")
     }
+
 
     suspend fun updateBet(bet: Bet, token: String, userId: String) {
         val response = client.patch("$supabaseUrl/rest/v1/bets") {

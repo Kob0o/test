@@ -12,142 +12,110 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.sun.net.httpserver.HttpServer
 import com.worldline.quiz.data.models.LoginViewModel
-import java.io.InputStreamReader
-import java.io.PrintWriter
-import java.net.ServerSocket
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import java.awt.Desktop
+import java.net.InetSocketAddress
 import java.net.URI
-import java.net.URLDecoder
 
 @Composable
-fun DesktopLoginScreen(
-    loginViewModel: LoginViewModel,
-    onLoginSuccess: () -> Unit
-) {
-    var isWaiting by remember { mutableStateOf(false) }
-    var errorMessage by remember { mutableStateOf<String?>(null) }
+fun DesktopLoginScreen(loginViewModel: LoginViewModel, onLoginSuccess: () -> Unit) {
+    val coroutineScope = rememberCoroutineScope()
+    var isLoading by remember { mutableStateOf(false) }
 
-    Column(Modifier.fillMaxSize().padding(16.dp)) {
-        Text("Connexion Desktop", style = MaterialTheme.typography.h4)
+    Column(
+        Modifier
+            .fillMaxSize()
+            .padding(16.dp)
+    ) {
+        Text("Connexion", style = MaterialTheme.typography.h4)
         Spacer(modifier = Modifier.height(24.dp))
-
-        errorMessage?.let {
-            Text("Erreur : $it", color = MaterialTheme.colors.error)
-            Spacer(modifier = Modifier.height(8.dp))
-        }
 
         Button(
             onClick = {
-                isWaiting = true
-                errorMessage = null
-
-                Thread {
-                    try {
-                        val server = ServerSocket(8080).apply { soTimeout = 120000 }
-
-                        val client = server.accept()
-                        val input = client.getInputStream()
-                        val output = client.getOutputStream()
-                        val reader = input.bufferedReader()
-                        val writer = PrintWriter(output, true)
-
-                        // Lire la requête
-                        val request = StringBuilder()
-                        while (true) {
-                            val line = reader.readLine() ?: break
-                            if (line.isEmpty()) break
-                            request.append(line).append("\n")
-                        }
-
-                        // Analyser la méthode et le chemin
-                        val firstLine = request.toString().lines().first()
-                        val (method, path) = firstLine.split(" ").let { it[0] to it[1] }
-
-                        when {
-                            path.startsWith("/callback") -> {
-                                // Envoyer la page de capture du token
-                                writer.println("HTTP/1.1 200 OK")
-                                writer.println("Content-Type: text/html; charset=utf-8")
-                                writer.println("Connection: close")
-                                writer.println()
-                                writer.println(
-                                    """
-                                    <html><body>
-                                        <script>
-                                            const hash = window.location.hash.substring(1);
-                                            const params = new URLSearchParams(hash);
-                                            const accessToken = params.get('access_token');
-                                            
-                                            fetch('/token', {
-                                                method: 'POST',
-                                                headers: {
-                                                    'Content-Type': 'application/x-www-form-urlencoded'
-                                                },
-                                                body: 'access_token=' + encodeURIComponent(accessToken)
-                                            }).then(() => {
-                                                window.close();
-                                            });
-                                        </script>
-                                    </body></html>
-                                    """.trimIndent()
-                                )
-                            }
-
-                            method == "POST" && path == "/token" -> {
-                                // Lire le corps de la requête
-                                val contentLength = request.toString()
-                                    .lines()
-                                    .find { it.startsWith("Content-Length:") }
-                                    ?.substringAfter(":")?.trim()?.toInt() ?: 0
-
-                                val body = InputStreamReader(input, "UTF-8")
-                                    .use { it.readText().take(contentLength) }
-
-                                val accessToken = URLDecoder.decode(
-                                    body.substringAfter("access_token="),
-                                    "UTF-8"
-                                )
-
-                                if (accessToken.isNotBlank()) {
-                                    loginViewModel.fetchUser(accessToken)
-                                    onLoginSuccess()
-
-                                    // Réponse de confirmation
-                                    writer.println("HTTP/1.1 200 OK")
-                                    writer.println("Content-Type: text/plain")
-                                    writer.println()
-                                    writer.println("Authentification réussie")
-                                }
-                            }
-                        }
-
-                        client.close()
-                        server.close()
-                    } catch (e: Exception) {
-                        errorMessage = "Erreur de connexion : ${e.localizedMessage}"
-                        isWaiting = false
-                    }
-                }.start()
-
-                // Ouvrir le navigateur
-                try {
-                    val authUrl = "https://kxtdhjouiuyjatcamfut.supabase.co/auth/v1/authorize" +
-                            "?provider=google" +
-                            "&redirect_to=http://localhost:8080/callback" +
-                            "&response_type=token"
-
-                    java.awt.Desktop.getDesktop().browse(URI(authUrl))
-                } catch (e: Exception) {
-                    errorMessage = "Impossible d'ouvrir le navigateur : ${e.message}"
-                    isWaiting = false
+                coroutineScope.launch(Dispatchers.IO) {
+                    isLoading = true
+                    startDesktopLoginFlow(loginViewModel, onLoginSuccess)
                 }
             },
-            enabled = !isWaiting
+            enabled = !isLoading
         ) {
-            Text(if (isWaiting) "Connexion en cours..." else "Se connecter avec Google")
+            Text("Connexion avec Google")
         }
     }
 }
+
+fun startDesktopLoginFlow(
+    loginViewModel: LoginViewModel,
+    onLoginSuccess: () -> Unit
+) {
+    val redirectUri = "http://localhost:4280/callback"
+    val authUrl =
+        "https://kxtdhjouiuyjatcamfut.supabase.co/auth/v1/authorize?provider=google&redirect_to=$redirectUri"
+
+    // Création du serveur local
+    val server = HttpServer.create(InetSocketAddress(4280), 0)
+
+    // Ce endpoint reçoit la redirection initiale avec fragment
+    server.createContext("/callback") { exchange ->
+        println("📩 Redirection reçue sur /callback")
+
+        val html = """
+            <html>
+              <body>
+                <script>
+                  const fragment = window.location.hash;
+                  if (fragment) {
+                    window.location.href = "/token?" + fragment.substring(1);
+                  } else {
+                    document.body.innerText = "Pas de token trouvé.";
+                  }
+                </script>
+                <p>Connexion en cours...</p>
+              </body>
+            </html>
+        """.trimIndent()
+
+        exchange.sendResponseHeaders(200, html.toByteArray().size.toLong())
+        exchange.responseBody.use { it.write(html.toByteArray()) }
+    }
+
+    // Ce endpoint reçoit les vrais tokens en query string
+    server.createContext("/token") { exchange ->
+        val query = exchange.requestURI.rawQuery
+        println("✅ Données reçues sur /token → $query")
+
+        val accessToken = query?.split("&")
+            ?.find { it.startsWith("access_token=") }
+            ?.substringAfter("=")
+
+        val responseText = if (accessToken != null) {
+            loginViewModel.fetchUser(accessToken)
+            onLoginSuccess()
+            "Connexion réussie. Vous pouvez fermer cette fenêtre."
+        } else {
+            "Erreur : aucun token reçu."
+        }
+
+        exchange.sendResponseHeaders(200, responseText.toByteArray().size.toLong())
+        exchange.responseBody.use { it.write(responseText.toByteArray()) }
+
+        server.stop(0)
+    }
+
+    server.executor = null
+    server.start()
+    println("🚀 Serveur local en écoute sur http://localhost:4280")
+
+    // Ouvre l'URL d'auth dans le navigateur
+    if (Desktop.isDesktopSupported()) {
+        Desktop.getDesktop().browse(URI(authUrl))
+    }
+}
+

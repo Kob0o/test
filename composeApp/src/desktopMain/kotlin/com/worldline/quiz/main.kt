@@ -8,6 +8,10 @@ import androidx.compose.ui.window.application
 import com.worldline.quiz.data.models.BetViewModel
 import com.worldline.quiz.data.models.LoginViewModel
 import com.worldline.quiz.screens.DesktopLoginScreen
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.launch
 
 fun main() = application {
     val loginViewModel = remember { LoginViewModel() }
@@ -20,8 +24,15 @@ fun main() = application {
     ) {
         if (session == null) {
             DesktopLoginScreen(loginViewModel = loginViewModel) {
-                session?.let { betViewModel.setSession(it.token, session!!.userId) }
+                CoroutineScope(Dispatchers.Main).launch {
+                    loginViewModel.session.collectLatest { session ->
+                        if (session != null) {
+                            betViewModel.setSession(session.token, session.userId)
+                        }
+                    }
+                }
             }
+
         } else {
             App(
                 betViewModel = betViewModel,

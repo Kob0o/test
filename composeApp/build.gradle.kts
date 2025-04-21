@@ -130,6 +130,8 @@ android {
 }
 dependencies {
     implementation(libs.identity.jvm)
+    implementation(libs.androidx.foundation.layout.android)
+    implementation(libs.androidx.material3.android)
 }
 
 compose.desktop {

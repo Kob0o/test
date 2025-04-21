@@ -106,12 +106,17 @@ class BetViewModel : CoroutineScope {
 
 
     fun deleteBet(id: Int) {
-        _bets.value = _bets.value.filter { it.id != id }
         launch {
             try {
-                client.deleteBet(id.toString(), token!!) // Passer le token
+                println("🔄 Suppression du pari ID=$id sur Supabase...")
+                client.deleteBet(id.toString(), token!!)
+                println("✅ Supprimé avec succès sur Supabase")
+
+                // ➕ Mise à jour locale seulement si succès
+                _bets.update { currentList -> currentList.filter { it.id != id } }
+
             } catch (e: Exception) {
-                println("Erreur lors de la suppression Supabase : ${e.message}")
+                println("❌ Erreur lors de la suppression Supabase : ${e.message}")
             }
         }
     }
